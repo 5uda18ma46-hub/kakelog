@@ -313,6 +313,7 @@ const SOURCES = {
   'rakuten-sec' :{name:'楽天証券',   e:'📈'},
   'paypay'      :{name:'PayPay',    e:'🅿️'},
   'cash'        :{name:'現金',       e:'💴'},
+  'unknown'     :{name:'その他',     e:'🧾'},  // レシートスキャンで登録した経路未確定の支出
 };
 
 /* ---------- 自動分類の初期キーワードルール ---------- */
@@ -400,6 +401,21 @@ function nearKey(t){
 }
 function buildNearMap(txs){ const m=new Map(); for(const t of txs){ const k=nearKey(t); m.set(k,(m.get(k)||0)+1); } return m; }
 function takeNear(map,t){ const k=nearKey(t); const c=map.get(k)||0; if(c>0){ map.set(k,c-1); return true; } return false; }
+/* レシートスキャン由来の「経路未確定(unknown)」明細を、後から来たCSV/メールの同日・同額の明細と合体させる */
+function buildUnknownIdx(){
+  const m = new Map();
+  for(const x of state.tx){
+    if(x.source!=='unknown') continue;
+    const k = x.date+'|'+x.amount;
+    if(!m.has(k)) m.set(k, []);
+    m.get(k).push(x);
+  }
+  return m;
+}
+function takeUnknown(map, t){
+  const arr = map.get(t.date+'|'+t.amount);
+  return (arr && arr.length) ? arr.shift() : null;
+}
 function toast(msg){
   const el=$('#toast'); el.textContent=msg; el.classList.add('show');
   clearTimeout(toast._t); toast._t=setTimeout(()=>el.classList.remove('show'), 2600);
@@ -549,7 +565,8 @@ function mkTx(date, amount, desc, source, via){
 async function importFiles(files){
   const existing = new Set(state.tx.map(txHash));
   const nearMail = buildNearMap(state.tx.filter(t=>t.via==='mail'));
-  let added=0, dup=0, balMsg='';
+  const unknownIdx = buildUnknownIdx();
+  let added=0, dup=0, merged=0, balMsg='';
   const perSource={};
   for(const f of files){
     let parsed;
@@ -561,6 +578,8 @@ async function importFiles(files){
     for(const t of parsed.txs){
       if(existing.has(t.hash)){ dup++; continue; }
       if(takeNear(nearMail, t)){ dup++; continue; }  // メール取り込み済みの同一取引
+      const ux = takeUnknown(unknownIdx, t);
+      if(ux){ ux.source=t.source; ux.via=t.via; existing.add(t.hash); merged++; continue; }  // レシート登録済みの支出と合体
       existing.add(t.hash);
       state.tx.push(t); added++;
       perSource[parsed.name]=(perSource[parsed.name]||0)+1;
@@ -577,9 +596,10 @@ async function importFiles(files){
   state.tx.sort((a,b)=> b.date.localeCompare(a.date));
   save(); render();
   const detail = Object.entries(perSource).map(([k,v])=>`${k} ${v}件`).join('、');
+  const mergeMsg = merged ? ` / レシート登録済み${merged}件と合体` : '';
   toast(added
-    ? `${added}件を取り込みました(${detail})${dup?` / 重複${dup}件はスキップ`:''}${balMsg}`
-    : (dup? `すべて取り込み済みでした(重複${dup}件)` : '取り込める明細がありませんでした'));
+    ? `${added}件を取り込みました(${detail})${dup?` / 重複${dup}件はスキップ`:''}${mergeMsg}${balMsg}`
+    : (dup||merged ? `新規はありませんでした(重複${dup}件${mergeMsg})` : '取り込める明細がありませんでした'));
 }
 
 /* =====================================================
@@ -1049,7 +1069,10 @@ function openReceiptMatchModal(cands){
         <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${fmtDate(t.date)}　${esc((t.desc||'(内容なし)').slice(0,14))}</span>
         <span class="num">${yen(t.amount)}</span></button>`).join('') || '<div class="muted" style="font-size:13px">明細がありません</div>'}
     </div>
-    ${info.amt?`<div style="margin-top:12px"><button class="btn" style="width:100%" onclick="scanAsCash()">💴 現金支出として新規登録(${yen(info.amt)})</button></div>`:''}
+    ${info.amt?`<div style="margin-top:12px">
+      <button class="btn" style="width:100%" onclick="scanAsNew()">🧾 支出として新規登録(${yen(info.amt)})</button>
+      <div class="muted" style="font-size:11px;margin-top:6px;text-align:center">支払い経路は未確定のまま登録されます。後からPayPayのCSVや通知メールで同じ支出が入ると自動で合体します。</div>
+    </div>`:''}
     <div style="margin-top:10px"><button class="btn ghost" style="width:100%" onclick="_pendingScan=null;closeModal()">キャンセル</button></div>`);
 }
 function chooseScanTx(id){
@@ -1058,17 +1081,18 @@ function chooseScanTx(id){
   applyReceipt(id, p.text);
   toast('レシートを紐付けました'); openTxDetail(id);
 }
-function scanAsCash(){
+function scanAsNew(){
   const p = _pendingScan; _pendingScan = null; closeModal();
   if(!p || !p.info.amt) return;
   const info = p.info;
-  const t = {id:uid(), date:info.date||todayStr(), amount:-info.amt, desc:info.store||'レシート', source:'cash', via:'manual', category:categorize(info.store,'cash')};
+  // 経路(現金/PayPay等)は決めつけず「その他」で登録。後からCSV/メールで同じ支出が来たら自動で合体して経路が確定する
+  const t = {id:uid(), date:info.date||todayStr(), amount:-info.amt, desc:info.store||'レシート', source:'unknown', via:'manual', category:categorize(info.store,'unknown')};
   if(t.category==='income' || t.category==='transfer') t.category = 'other';
   t.hash = txHash(t);
   state.tx.push(t);
   state.tx.sort((a,b)=> b.date.localeCompare(a.date));
   applyReceipt(t.id, p.text);
-  toast('現金支出として登録しました'); openTxDetail(t.id);
+  toast('支出として登録しました(経路は取り込み時に自動確定)'); openTxDetail(t.id);
 }
 
 /* ---------- 手動入力(現金) ---------- */
@@ -1426,7 +1450,8 @@ async function syncGmail(silent){
     /* 照合対象: CSV/手動の全取引 + メール由来の楽天ペイ取引
        (ペイのメールとカードの通知/CSVは同じ決済を別表記で持ってくるため) */
     const nearOther = buildNearMap(state.tx.filter(t=>t.via!=='mail' || t.source==='rakuten-pay'));
-    let added=0, dup=0, scanned=0, unparsed=0, totalIds=0;
+    const unknownIdx = buildUnknownIdx();
+    let added=0, dup=0, merged=0, scanned=0, unparsed=0, totalIds=0;
     for(const def of MAIL_DEFS){
       let pageToken=null; const ids=[];
       do{
@@ -1459,6 +1484,8 @@ async function syncGmail(silent){
         for(const t of txs){
           if(hashes.has(t.hash)){ dup++; continue; }
           if(takeNear(nearOther, t)){ dup++; continue; }  // CSV取り込み済みの同一取引
+          const ux = takeUnknown(unknownIdx, t);
+          if(ux){ ux.source=t.source; ux.via=t.via; hashes.add(t.hash); merged++; continue; }  // レシート登録済みの支出と合体
           hashes.add(t.hash);
           state.tx.push(t); added++;
           // 同一同期内でペイ→カードの順に同じ決済が来ても照合できるよう、追加分も照合対象に足す
@@ -1471,9 +1498,10 @@ async function syncGmail(silent){
     g.lastSync = new Date().toISOString();
     state.tx.sort((a,b)=> b.date.localeCompare(a.date));
     save(); render();
+    const mergeMsg = merged ? ` / レシート登録済み${merged}件と合体` : '';
     toast(added
-      ? `メールから${added}件を取り込みました${dup?`(重複${dup}件はスキップ)`:''}`
-      : (totalIds ? `新しい明細はありませんでした${unparsed?`(解析不能${unparsed}通)`:''}`
+      ? `メールから${added}件を取り込みました${dup?`(重複${dup}件はスキップ)`:''}${mergeMsg}`
+      : (totalIds ? `新しい明細はありませんでした${unparsed?`(解析不能${unparsed}通)`:''}${mergeMsg}`
                   : '対象メールが見つかりませんでした。各サービスの通知メール設定を確認してください'));
   }catch(e){
     if(!silent) toast('同期に失敗: '+e.message);
