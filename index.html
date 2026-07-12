@@ -268,13 +268,14 @@ svg .bar{cursor:pointer}
   <main id="main"></main>
 </div>
 <nav id="tabbar"></nav>
-<button id="fab" title="現金の支出を追加" onclick="openTxModal()">＋</button>
+<button id="fab" title="記録を追加" onclick="openFabMenu()">＋</button>
 <div id="modal-root"></div>
 <div id="tooltip"></div>
 <div id="toast"></div>
 <input type="file" id="fileinput" accept=".csv,text/csv" multiple hidden>
 <input type="file" id="jsoninput" accept=".json,application/json" hidden>
 <input type="file" id="receiptinput" accept="image/*" hidden>
+<input type="file" id="scaninput" accept="image/*" hidden>
 
 <script>
 'use strict';
@@ -936,42 +937,156 @@ function saveTxDetail(id){
   save(); closeModal(); render(); toast('保存しました');
 }
 /* レシートOCR: 画像を自分のDriveへGoogleドキュメントとして一時アップロード(=Googleが文字起こし)
-   → テキストをエクスポートしてメモ欄に追記 → 一時ファイルを削除 */
+   → テキストをエクスポート → 一時ファイルを削除。テキストを返す */
+async function driveOcr(blob){
+  if(!_gmailToken) await gmailAuth();
+  const b64 = await new Promise((res,rej)=>{
+    const r = new FileReader();
+    r.onload = ()=>res(String(r.result).split(',')[1]);
+    r.onerror = ()=>rej(new Error('画像の読み込みに失敗しました'));
+    r.readAsDataURL(blob);
+  });
+  const boundary = 'kakelogocr';
+  const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n`+
+    JSON.stringify({name:'kakelog-ocr-temp', mimeType:'application/vnd.google-apps.document'})+
+    `\r\n--${boundary}\r\nContent-Type: image/jpeg\r\nContent-Transfer-Encoding: base64\r\n\r\n`+b64+`\r\n--${boundary}--`;
+  const up = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&ocrLanguage=ja', {
+    method:'POST', headers:{Authorization:'Bearer '+_gmailToken, 'Content-Type':'multipart/related; boundary='+boundary}, body});
+  if(!up.ok) throw new Error('Drive APIエラー('+up.status+')'+(up.status===403?' — 設定画面の案内に沿ってGoogle Drive APIを有効化してください':''));
+  const f = await up.json();
+  try{
+    const ex = await fetch('https://www.googleapis.com/drive/v3/files/'+f.id+'/export?mimeType=text/plain', {headers:{Authorization:'Bearer '+_gmailToken}});
+    if(!ex.ok) throw new Error('テキスト変換エラー('+ex.status+')');
+    const text = (await ex.text()).replace(/^﻿/,'').replace(/\r/g,'').replace(/\n{3,}/g,'\n\n').trim();
+    if(!text) throw new Error('文字を読み取れませんでした(写真の明るさ・角度を変えてお試しください)');
+    return text;
+  }finally{
+    // 一時ファイルを削除(失敗しても本処理には影響させない)
+    fetch('https://www.googleapis.com/drive/v3/files/'+f.id, {method:'DELETE', headers:{Authorization:'Bearer '+_gmailToken}}).catch(()=>{});
+  }
+}
+/* 詳細画面からの手動文字起こし(添付済み写真をメモ欄へ) */
 async function ocrReceipt(id){
   const t = state.tx.find(x=>x.id===id); if(!t || !t.receipt) return;
   const btn = $('#ocr-btn'); if(btn){ btn.disabled=true; btn.textContent='文字起こし中…'; }
   try{
-    if(!_gmailToken) await gmailAuth();
     const blob = await idb.get(id);
     if(!blob) throw new Error('写真が見つかりません');
-    const b64 = await new Promise((res,rej)=>{
-      const r = new FileReader();
-      r.onload = ()=>res(String(r.result).split(',')[1]);
-      r.onerror = ()=>rej(new Error('画像の読み込みに失敗しました'));
-      r.readAsDataURL(blob);
-    });
-    const boundary = 'kakelogocr';
-    const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n`+
-      JSON.stringify({name:'kakelog-ocr-temp', mimeType:'application/vnd.google-apps.document'})+
-      `\r\n--${boundary}\r\nContent-Type: image/jpeg\r\nContent-Transfer-Encoding: base64\r\n\r\n`+b64+`\r\n--${boundary}--`;
-    const up = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&ocrLanguage=ja', {
-      method:'POST', headers:{Authorization:'Bearer '+_gmailToken, 'Content-Type':'multipart/related; boundary='+boundary}, body});
-    if(!up.ok) throw new Error('Drive APIエラー('+up.status+')'+(up.status===403?' — 設定画面の案内に沿ってGoogle Drive APIを有効化してください':''));
-    const f = await up.json();
-    try{
-      const ex = await fetch('https://www.googleapis.com/drive/v3/files/'+f.id+'/export?mimeType=text/plain', {headers:{Authorization:'Bearer '+_gmailToken}});
-      if(!ex.ok) throw new Error('テキスト変換エラー('+ex.status+')');
-      let text = (await ex.text()).replace(/^﻿/,'').replace(/\r/g,'').replace(/\n{3,}/g,'\n\n').trim();
-      if(!text) throw new Error('文字を読み取れませんでした(写真の明るさ・角度を変えてお試しください)');
-      const memoEl = $('#d-memo');
-      if(memoEl) memoEl.value = (memoEl.value.trim() ? memoEl.value.trim()+'\n\n' : '') + text;
-      toast('文字起こし完了。内容を確認して「保存」を押してください');
-    }finally{
-      // 一時ファイルを削除(失敗しても本処理には影響させない)
-      fetch('https://www.googleapis.com/drive/v3/files/'+f.id, {method:'DELETE', headers:{Authorization:'Bearer '+_gmailToken}}).catch(()=>{});
-    }
+    const text = await driveOcr(blob);
+    const memoEl = $('#d-memo');
+    if(memoEl) memoEl.value = (memoEl.value.trim() ? memoEl.value.trim()+'\n\n' : '') + text;
+    toast('文字起こし完了。内容を確認して「保存」を押してください');
   }catch(e){ toast('文字起こしに失敗: '+e.message); }
   finally{ const b=$('#ocr-btn'); if(b){ b.disabled=false; b.textContent='🔍 レシートを文字起こし'; } }
+}
+
+/* =====================================================
+   レシートスキャン: 撮影→OCR→合計金額・日付で明細を自動照合→紐付け
+===================================================== */
+let _pendingScan = null;
+function openFabMenu(){
+  openModal(`
+    <h3>記録を追加</h3>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <button class="btn" onclick="closeModal();startReceiptScan()">📷 レシートをスキャン(自動で明細に紐付け)</button>
+      <button class="btn ghost" onclick="closeModal();openTxModal()">✏️ 現金の支出を手入力</button>
+    </div>`);
+}
+function startReceiptScan(){ $('#scaninput').click(); }
+$('#scaninput').addEventListener('change', async e=>{
+  const f = e.target.files[0]; e.target.value='';
+  if(f) scanReceipt(f);
+});
+async function scanReceipt(file){
+  toast('レシートを読み取っています…');
+  try{
+    const blob = await resizeImage(file);
+    const text = await driveOcr(blob);
+    const info = parseReceiptText(text);
+    _pendingScan = {blob, text, info};
+    const cands = matchReceiptTx(info);
+    if(cands.length===1){
+      const id = cands[0].id;
+      _pendingScan = null;
+      await applyReceipt(id, blob, text);
+      toast(`「${(cands[0].desc||'明細').slice(0,12)}」に自動で紐付けました`);
+      openTxDetail(id);
+    }else{
+      openReceiptMatchModal(cands);
+    }
+  }catch(e){ toast('スキャン失敗: '+e.message); }
+}
+/* OCRテキストから合計金額・日付・店名を推定 */
+function parseReceiptText(text){
+  const lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
+  let amt = null;
+  for(const l of lines){
+    if(/小計|お預り|お預かり|釣|ポイント|残高|値引/.test(l)) continue;
+    const m = l.match(/(?:合計|お買上げ?計|ご?請求|クレジット|計)\D{0,8}?[¥￥]?\s*([0-9][0-9,]*)/);
+    if(m){ const n = normNum(m[1]); if(!isNaN(n) && n>0){ amt = n; if(/合計/.test(l)) break; } }
+  }
+  if(amt==null){
+    let mx = NaN;
+    for(const m of text.matchAll(/[¥￥]\s*([0-9][0-9,]*)/g)){ const n=normNum(m[1]); if(!isNaN(n) && (isNaN(mx)||n>mx)) mx=n; }
+    amt = isNaN(mx) ? null : mx;
+  }
+  const dm = text.match(/(20\d{2})[年\/\-.](\d{1,2})[月\/\-.](\d{1,2})/);
+  const date = dm ? `${dm[1]}-${String(+dm[2]).padStart(2,'0')}-${String(+dm[3]).padStart(2,'0')}` : null;
+  return {amt, date, store: lines[0]||''};
+}
+/* 同額の支出明細を探す(日付が近いものを優先) */
+function matchReceiptTx({amt, date}){
+  if(!amt) return [];
+  const c = state.tx.filter(t=> t.amount===-amt && t.category!=='transfer');
+  if(!c.length) return [];
+  if(date){
+    const exact = c.filter(t=>t.date===date); if(exact.length) return exact;
+    const near = c.filter(t=>Math.abs(new Date(t.date)-new Date(date))<=3*864e5); if(near.length) return near;
+  }
+  return c;
+}
+async function applyReceipt(id, blob, text){
+  const t = state.tx.find(x=>x.id===id); if(!t) return;
+  await idb.put(id, blob);
+  t.receipt = true;
+  t.memo = (t.memo ? t.memo+'\n\n' : '') + text.trim();
+  save(); render();
+}
+function openReceiptMatchModal(cands){
+  const info = _pendingScan.info;
+  const list = cands.length ? cands : state.tx.filter(t=>isExpense(t)).slice(0,8);
+  openModal(`
+    <h3>どの明細のレシートですか?</h3>
+    <div class="muted" style="font-size:13px;margin-bottom:10px">
+      読み取り結果: <b class="num">${info.amt?yen(info.amt):'金額不明'}</b>${info.date?` / ${info.date}`:''}${info.store?` / ${esc(info.store.slice(0,16))}`:''}
+    </div>
+    ${cands.length? '<div class="muted" style="font-size:12px;margin-bottom:8px">同じ金額の明細が複数あります。該当するものを選んでください。</div>'
+                  : '<div class="notice" style="margin-bottom:10px">同じ金額の明細が見つかりませんでした。下から選ぶか、現金支出として登録してください。</div>'}
+    <div style="display:flex;flex-direction:column;gap:6px;max-height:38vh;overflow:auto">
+      ${list.map(t=>`<button class="btn ghost sm" style="justify-content:space-between;width:100%" onclick="chooseScanTx('${t.id}')">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${fmtDate(t.date)}　${esc((t.desc||'(内容なし)').slice(0,14))}</span>
+        <span class="num">${yen(t.amount)}</span></button>`).join('') || '<div class="muted" style="font-size:13px">明細がありません</div>'}
+    </div>
+    ${info.amt?`<div style="margin-top:12px"><button class="btn" style="width:100%" onclick="scanAsCash()">💴 現金支出として新規登録(${yen(info.amt)})</button></div>`:''}
+    <div style="margin-top:10px"><button class="btn ghost" style="width:100%" onclick="_pendingScan=null;closeModal()">キャンセル</button></div>`);
+}
+async function chooseScanTx(id){
+  const p = _pendingScan; _pendingScan = null; closeModal();
+  if(!p) return;
+  await applyReceipt(id, p.blob, p.text);
+  toast('レシートを紐付けました'); openTxDetail(id);
+}
+async function scanAsCash(){
+  const p = _pendingScan; _pendingScan = null; closeModal();
+  if(!p || !p.info.amt) return;
+  const info = p.info;
+  const t = {id:uid(), date:info.date||todayStr(), amount:-info.amt, desc:info.store||'レシート', source:'cash', via:'manual', category:categorize(info.store,'cash')};
+  if(t.category==='income' || t.category==='transfer') t.category = 'other';
+  t.hash = txHash(t);
+  state.tx.push(t);
+  state.tx.sort((a,b)=> b.date.localeCompare(a.date));
+  await applyReceipt(t.id, p.blob, p.text);
+  toast('現金支出として登録しました'); openTxDetail(t.id);
 }
 
 /* ---------- 手動入力(現金) ---------- */
@@ -1094,6 +1209,13 @@ function renderImport(){
     <span class="muted" style="font-size:12px">楽天カード / 楽天銀行 / PayPay のCSVを自動判別・重複は自動スキップ</span>
   </div>
 
+  <div class="card" style="margin-top:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+    <div style="flex:1;min-width:200px">
+      <h2 style="margin-bottom:4px">📷 レシートスキャン</h2>
+      <div class="muted" style="font-size:12.5px;line-height:1.6">レシートを撮ると、合計金額と日付から該当の明細を自動で見つけて、品目をメモ欄に書き込みます。</div>
+    </div>
+    <button class="btn" onclick="startReceiptScan()">スキャンする</button>
+  </div>
   <div class="card" style="margin-top:14px">
     <h2>各サービスのCSVダウンロード方法</h2>
     <div class="guide">
