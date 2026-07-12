@@ -274,6 +274,7 @@ svg .bar{cursor:pointer}
 <div id="toast"></div>
 <input type="file" id="fileinput" accept=".csv,text/csv" multiple hidden>
 <input type="file" id="jsoninput" accept=".json,application/json" hidden>
+<input type="file" id="receiptinput" accept="image/*" hidden>
 
 <script>
 'use strict';
@@ -352,6 +353,7 @@ function defaultState(){
     rules: [],           // 学習ルール {kw, cat}
     settings: {demoLoaded:false},
     gmail: {clientId:'', processedIds:[], lastSync:null, sinceDays:90, auto:true},
+    drive: {enabled:false, fileId:null, lastBackup:null},
   };
 }
 function load(){
@@ -362,7 +364,7 @@ function load(){
     return Object.assign(defaultState(), s);
   }catch(e){ return defaultState(); }
 }
-function save(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+function save(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); scheduleBackup(); }
 
 /* ---------- utils ---------- */
 const $ = sel => document.querySelector(sel);
@@ -760,7 +762,7 @@ function sourceBreakdownHTML(s){
 /* ---------- 明細 ---------- */
 function renderTx(){
   const txs = txOfMonth(viewMonth).filter(t=>{
-    if(txFilter.q && !(t.desc||'').toLowerCase().includes(txFilter.q.toLowerCase())) return false;
+    if(txFilter.q && !((t.desc||'')+' '+(t.memo||'')).toLowerCase().includes(txFilter.q.toLowerCase())) return false;
     if(txFilter.cat && t.category!==txFilter.cat) return false;
     if(txFilter.src && t.source!==txFilter.src) return false;
     return true;
@@ -797,10 +799,10 @@ function txRowHTML(t){
   const c = CAT[t.category]||CAT.other;
   return `<div class="txrow">
     <div class="ic">${c.e}</div>
-    <div class="bd">
-      <div class="ds">${esc(t.desc)||'<span class="muted">(内容なし)</span>'}</div>
+    <div class="bd" onclick="openTxDetail('${t.id}')" style="cursor:pointer" title="タップで詳細・メモ・レシート">
+      <div class="ds">${esc(t.desc)||'<span class="muted">(内容なし)</span>'}${t.receipt?' 🧾':''}${t.memo?' 📝':''}</div>
       <div class="meta">
-        <button class="chip" onclick="openCatPicker('${t.id}')" title="カテゴリを変更">${c.name}</button>
+        <button class="chip" onclick="event.stopPropagation();openCatPicker('${t.id}')" title="カテゴリを変更">${c.name}</button>
         <span class="srcbadge">${SOURCES[t.source]?.name||t.source}</span>
       </div>
     </div>
@@ -812,6 +814,7 @@ function delTx(id){
   const t = state.tx.find(x=>x.id===id); if(!t) return;
   if(!confirm(`「${t.desc||'この明細'}」(${yen(t.amount)})を削除しますか?`)) return;
   state.tx = state.tx.filter(x=>x.id!==id);
+  idb.del(id).catch(()=>{});
   save(); render(); toast('削除しました');
 }
 
@@ -843,6 +846,91 @@ function setCat(id, cat){
     toast(`カテゴリを「${CAT[cat].name}」に変更しました`);
   }
   save(); closeModal(); render();
+}
+
+/* ---------- 明細の詳細(メモ・レシート写真) ---------- */
+/* レシート写真は容量が大きいため localStorage ではなく IndexedDB に保存する(端末内のみ) */
+const idb = {
+  _db: null,
+  open(){
+    return new Promise((res,rej)=>{
+      if(idb._db) return res(idb._db);
+      const r = indexedDB.open('kakelog', 1);
+      r.onupgradeneeded = ()=> r.result.createObjectStore('receipts');
+      r.onsuccess = ()=>{ idb._db = r.result; res(idb._db); };
+      r.onerror = ()=> rej(r.error);
+    });
+  },
+  async put(k,v){ const db=await idb.open(); return new Promise((res,rej)=>{ const t=db.transaction('receipts','readwrite'); t.objectStore('receipts').put(v,k); t.oncomplete=()=>res(); t.onerror=()=>rej(t.error); }); },
+  async get(k){ const db=await idb.open(); return new Promise((res,rej)=>{ const q=db.transaction('receipts').objectStore('receipts').get(k); q.onsuccess=()=>res(q.result||null); q.onerror=()=>rej(q.error); }); },
+  async del(k){ const db=await idb.open(); return new Promise((res,rej)=>{ const t=db.transaction('receipts','readwrite'); t.objectStore('receipts').delete(k); t.oncomplete=()=>res(); t.onerror=()=>rej(t.error); }); },
+};
+function resizeImage(file){
+  return new Promise((res,rej)=>{
+    const img = new Image();
+    img.onload = ()=>{
+      const MAX=1600;
+      const s = Math.min(1, MAX/Math.max(img.width,img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width*s); c.height = Math.round(img.height*s);
+      c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+      c.toBlob(b=> b?res(b):rej(new Error('画像を変換できませんでした')), 'image/jpeg', 0.82);
+      URL.revokeObjectURL(img.src);
+    };
+    img.onerror = ()=>rej(new Error('画像を読み込めませんでした'));
+    img.src = URL.createObjectURL(file);
+  });
+}
+async function openTxDetail(id){
+  const t = state.tx.find(x=>x.id===id); if(!t) return;
+  let imgUrl = null;
+  if(t.receipt){ const blob = await idb.get(id).catch(()=>null); if(blob) imgUrl = URL.createObjectURL(blob); }
+  const c = CAT[t.category]||CAT.other;
+  openModal(`
+    <h3>${esc(t.desc)||'明細の詳細'}</h3>
+    <div class="muted" style="font-size:13px;margin-bottom:12px">
+      ${fmtDate(t.date)} / <span class="num">${yen(t.amount)}</span> / ${c.e} ${c.name} / ${SOURCES[t.source]?.name||t.source}
+    </div>
+    <div class="frow"><label>メモ(買った物・値段など。検索対象になります)</label>
+      <textarea id="d-memo" rows="4" placeholder="例: 鶏むね肉 398円、ブロッコリー 158円">${esc(t.memo||'')}</textarea></div>
+    <div class="frow"><label>レシート写真(この端末にのみ保存)</label>
+      ${imgUrl?`<img src="${imgUrl}" alt="レシート" style="max-width:100%;max-height:45vh;object-fit:contain;border-radius:12px;border:1px solid var(--hairline);display:block">`
+              :`<div class="muted" style="font-size:13px;padding:6px 0">まだ添付されていません</div>`}
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <button class="btn ghost sm" onclick="pickReceipt('${id}')">📷 ${imgUrl?'写真を差し替え':'写真を添付'}</button>
+        ${imgUrl?`<button class="btn danger sm" onclick="removeReceipt('${id}')">写真を削除</button>`:''}
+      </div></div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button class="btn ghost" style="flex:1" onclick="closeModal()">閉じる</button>
+      <button class="btn" style="flex:2" onclick="saveTxDetail('${id}')">保存</button>
+    </div>`);
+}
+function pickReceipt(id){ const inp=$('#receiptinput'); inp.dataset.tx=id; inp.click(); }
+$('#receiptinput').addEventListener('change', async e=>{
+  const f = e.target.files[0]; const id = e.target.dataset.tx; e.target.value='';
+  if(!f || !id) return;
+  const t = state.tx.find(x=>x.id===id); if(!t) return;
+  // モーダル内のメモの編集中内容を失わないよう先に退避
+  const memoEl = $('#d-memo'); if(memoEl) t.memo = memoEl.value.trim();
+  try{
+    const blob = await resizeImage(f);
+    await idb.put(id, blob);
+    t.receipt = true;
+    save(); openTxDetail(id); toast('レシートを添付しました');
+  }catch(err){ toast('添付に失敗: '+err.message); }
+});
+async function removeReceipt(id){
+  const t = state.tx.find(x=>x.id===id); if(!t) return;
+  if(!confirm('レシート写真を削除しますか?')) return;
+  await idb.del(id).catch(()=>{});
+  delete t.receipt;
+  save(); openTxDetail(id); toast('写真を削除しました');
+}
+function saveTxDetail(id){
+  const t = state.tx.find(x=>x.id===id); if(!t) return;
+  const v = $('#d-memo').value.trim();
+  if(v) t.memo = v; else delete t.memo;
+  save(); closeModal(); render(); toast('保存しました');
 }
 
 /* ---------- 手動入力(現金) ---------- */
@@ -1023,7 +1111,7 @@ $('#fileinput').addEventListener('change', e=>{ if(e.target.files.length) import
    の通知メールを gmail.readonly スコープで読み取り、明細化する。
    トークンはメモリ上のみ。メール本文は保存しない。
 ===================================================== */
-const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+const OAUTH_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/drive.file';
 let _gmailToken = null, _syncing = false;
 let _lastFailures = [];   // 直近の同期で解析できなかったメール(メモリのみ・保存しない)
 
@@ -1055,7 +1143,7 @@ function gmailAuth(){
       try{
         const tc = google.accounts.oauth2.initTokenClient({
           client_id: state.gmail.clientId.trim(),
-          scope: GMAIL_SCOPE,
+          scope: OAUTH_SCOPE,
           callback: t=>{ if(t && t.access_token){ _gmailToken=t.access_token; res(); } else rej(new Error('アクセス許可を取得できませんでした')); },
           error_callback: e=>{
             const t=e && e.type;
@@ -1277,6 +1365,87 @@ function copyFailures(){
     .then(()=>toast('コピーしました。チャットに貼り付けてください'))
     .catch(()=>toast('コピーできませんでした。表示部分を手動で選択してコピーしてください'));
 }
+
+/* =====================================================
+   Google Drive 自動バックアップ (drive.file スコープ)
+   データJSONを Drive の kakelog-backup.json に保存する。
+   レシート写真(IndexedDB)は含まれない。
+===================================================== */
+let _bkTimer = null, _inBackup = false;
+function scheduleBackup(){
+  // 保存のたびに呼ばれる。連打を避けるため20秒デバウンス。トークンがある時だけ自動実行
+  if(_inBackup || !state.drive || !state.drive.enabled || !_gmailToken) return;
+  clearTimeout(_bkTimer);
+  _bkTimer = setTimeout(()=>driveBackupNow(true), 20000);
+}
+async function driveApiFindBackup(){
+  const q = encodeURIComponent("name='kakelog-backup.json' and trashed=false");
+  const r = await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,modifiedTime)', {headers:{Authorization:'Bearer '+_gmailToken}});
+  if(!r.ok) throw new Error('Drive APIエラー('+r.status+')'+(r.status===403?' — Google Cloudで「Google Drive API」を有効化してください':''));
+  const j = await r.json();
+  return (j.files && j.files[0]) || null;
+}
+async function driveBackupNow(auto){
+  if(_inBackup) return;
+  if(!state.drive.enabled){ if(!auto) toast('先にDriveバックアップをONにしてください'); return; }
+  _inBackup = true;
+  const btn = $('#drive-bk-btn'); if(btn){ btn.disabled=true; btn.textContent='保存中…'; }
+  try{
+    if(!_gmailToken){ if(auto){ _inBackup=false; return; } await gmailAuth(); }
+    const content = JSON.stringify(state);
+    if(!state.drive.fileId){
+      const found = await driveApiFindBackup();
+      if(found) state.drive.fileId = found.id;
+    }
+    if(state.drive.fileId){
+      const r = await fetch('https://www.googleapis.com/upload/drive/v3/files/'+state.drive.fileId+'?uploadType=media', {
+        method:'PATCH', headers:{Authorization:'Bearer '+_gmailToken, 'Content-Type':'application/json'}, body:content});
+      if(r.status===404){ state.drive.fileId=null; _inBackup=false; return driveBackupNow(auto); }
+      if(!r.ok) throw new Error('Drive APIエラー('+r.status+')');
+    }else{
+      const boundary = 'kakelogboundary';
+      const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n`+
+        JSON.stringify({name:'kakelog-backup.json', mimeType:'application/json'})+
+        `\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n`+content+`\r\n--${boundary}--`;
+      const r = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+        method:'POST', headers:{Authorization:'Bearer '+_gmailToken, 'Content-Type':'multipart/related; boundary='+boundary}, body});
+      if(!r.ok) throw new Error('Drive APIエラー('+r.status+')'+(r.status===403?' — Google Cloudで「Google Drive API」を有効化してください':''));
+      const j = await r.json();
+      state.drive.fileId = j.id;
+    }
+    state.drive.lastBackup = new Date().toISOString();
+    save();
+    if(!auto) toast('Google Driveにバックアップしました');
+    if(page==='settings') render();
+  }catch(e){
+    if(!auto) toast('バックアップ失敗: '+e.message);
+  }finally{
+    _inBackup = false;
+    const b = $('#drive-bk-btn'); if(b){ b.disabled=false; b.textContent='今すぐバックアップ'; }
+  }
+}
+async function driveRestore(){
+  if(!confirm('Google Drive上のバックアップで、この端末のデータを上書きしますか?')) return;
+  try{
+    if(!_gmailToken) await gmailAuth();
+    let fid = state.drive.fileId;
+    if(!fid){ const found = await driveApiFindBackup(); if(!found){ toast('Drive上にバックアップが見つかりません'); return; } fid = found.id; }
+    const r = await fetch('https://www.googleapis.com/drive/v3/files/'+fid+'?alt=media', {headers:{Authorization:'Bearer '+_gmailToken}});
+    if(!r.ok) throw new Error('Drive APIエラー('+r.status+')');
+    const s = await r.json();
+    if(!Array.isArray(s.tx)) throw new Error('バックアップの形式が不正です');
+    const keep = {enabled:true, fileId:fid, lastBackup:state.drive.lastBackup};
+    state = Object.assign(defaultState(), s);
+    state.drive = Object.assign({}, state.drive, keep);
+    save(); render();
+    toast(`Driveから復元しました(明細${state.tx.length}件)`);
+  }catch(e){ toast('復元に失敗: '+e.message); }
+}
+function toggleDrive(on){
+  state.drive.enabled = !!on;
+  save(); render();
+  if(on) driveBackupNow(false);
+}
 function setAutoSync(on){ state.gmail.auto = !!on; save(); }
 /* 起動時の自動同期: 最初の画面操作(クリック)を合図に実行する(ポップアップブロック回避) */
 function armAutoSync(){
@@ -1350,6 +1519,26 @@ function renderSettings(){
         <button class="del" style="color:var(--ink-3)" onclick="delRule(${i})" title="削除">✕</button>
       </div>`).join('')
     : '<div class="muted" style="font-size:13px">明細のカテゴリを変更すると、店名キーワードを自動で学習してここに表示されます。</div>'}
+  </div>
+  <div class="card">
+    <h2>☁️ Google Driveバックアップ</h2>
+    ${state.gmail.clientId ? `
+    <label style="display:flex;align-items:center;gap:8px;font-size:14px;padding:4px 0 10px">
+      <input type="checkbox" ${state.drive.enabled?'checked':''} onchange="toggleDrive(this.checked)">
+      <b>自動バックアップをON</b>
+    </label>
+    <div class="muted" style="font-size:12.5px;line-height:1.7;margin-bottom:10px">
+      データが変わるたびに、あなたのGoogle Driveの「kakelog-backup.json」へ自動保存されます(20秒ごとにまとめて保存)。
+      ${state.drive.lastBackup?`<br>最終バックアップ: ${new Date(state.drive.lastBackup).toLocaleString('ja-JP')}`:''}
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn ghost sm" id="drive-bk-btn" onclick="driveBackupNow(false)">今すぐバックアップ</button>
+      <button class="btn ghost sm" onclick="driveRestore()">Driveから復元</button>
+    </div>
+    <div class="muted" style="font-size:11.5px;line-height:1.7;margin-top:10px">
+      ※初回はGoogle Cloudで「Google Drive API」の有効化(Gmail APIと同じ手順)と、認証画面での再許可が必要です。レシート写真は容量の都合でバックアップに含まれません(端末内のみ)。
+    </div>`
+    : `<div class="muted" style="font-size:13px">先に取り込み画面でGmail連携(クライアントID設定)を済ませると使えるようになります。</div>`}
   </div>
   <div class="card">
     <h2>データ</h2>
