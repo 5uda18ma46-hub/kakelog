@@ -362,7 +362,9 @@ function load(){
     const raw = localStorage.getItem(LS_KEY);
     if(!raw) return defaultState();
     const s = JSON.parse(raw);
-    return Object.assign(defaultState(), s);
+    const st = Object.assign(defaultState(), s);
+    for(const t of st.tx){ delete t.receipt; }  // 旧バージョンの写真添付フラグを掃除
+    return st;
   }catch(e){ return defaultState(); }
 }
 function save(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); scheduleBackup(); }
@@ -801,7 +803,7 @@ function txRowHTML(t){
   return `<div class="txrow">
     <div class="ic">${c.e}</div>
     <div class="bd" onclick="openTxDetail('${t.id}')" style="cursor:pointer" title="タップで詳細・メモ・レシート">
-      <div class="ds">${esc(t.desc)||'<span class="muted">(内容なし)</span>'}${t.receipt?' 🧾':''}${t.memo?' 📝':''}</div>
+      <div class="ds">${esc(t.desc)||'<span class="muted">(内容なし)</span>'}${t.memo?' 📝':''}</div>
       <div class="meta">
         <button class="chip" onclick="event.stopPropagation();openCatPicker('${t.id}')" title="カテゴリを変更">${c.name}</button>
         <span class="srcbadge">${SOURCES[t.source]?.name||t.source}</span>
@@ -815,7 +817,6 @@ function delTx(id){
   const t = state.tx.find(x=>x.id===id); if(!t) return;
   if(!confirm(`「${t.desc||'この明細'}」(${yen(t.amount)})を削除しますか?`)) return;
   state.tx = state.tx.filter(x=>x.id!==id);
-  idb.del(id).catch(()=>{});
   save(); render(); toast('削除しました');
 }
 
@@ -849,23 +850,9 @@ function setCat(id, cat){
   save(); closeModal(); render();
 }
 
-/* ---------- 明細の詳細(メモ・レシート写真) ---------- */
-/* レシート写真は容量が大きいため localStorage ではなく IndexedDB に保存する(端末内のみ) */
-const idb = {
-  _db: null,
-  open(){
-    return new Promise((res,rej)=>{
-      if(idb._db) return res(idb._db);
-      const r = indexedDB.open('kakelog', 1);
-      r.onupgradeneeded = ()=> r.result.createObjectStore('receipts');
-      r.onsuccess = ()=>{ idb._db = r.result; res(idb._db); };
-      r.onerror = ()=> rej(r.error);
-    });
-  },
-  async put(k,v){ const db=await idb.open(); return new Promise((res,rej)=>{ const t=db.transaction('receipts','readwrite'); t.objectStore('receipts').put(v,k); t.oncomplete=()=>res(); t.onerror=()=>rej(t.error); }); },
-  async get(k){ const db=await idb.open(); return new Promise((res,rej)=>{ const q=db.transaction('receipts').objectStore('receipts').get(k); q.onsuccess=()=>res(q.result||null); q.onerror=()=>rej(q.error); }); },
-  async del(k){ const db=await idb.open(); return new Promise((res,rej)=>{ const t=db.transaction('receipts','readwrite'); t.objectStore('receipts').delete(k); t.oncomplete=()=>res(); t.onerror=()=>rej(t.error); }); },
-};
+/* ---------- 明細の詳細(メモ・レシート読み取り) ---------- */
+/* 方針: レシート写真は保存しない(容量節約)。読み取りに使ったら破棄し、テキストだけをメモに残す */
+try{ indexedDB.deleteDatabase('kakelog'); }catch(e){}  // 旧バージョンが保存した写真を削除して容量を回収
 function resizeImage(file){
   return new Promise((res,rej)=>{
     const img = new Image();
@@ -882,28 +869,20 @@ function resizeImage(file){
     img.src = URL.createObjectURL(file);
   });
 }
-async function openTxDetail(id){
+function openTxDetail(id){
   const t = state.tx.find(x=>x.id===id); if(!t) return;
-  let imgUrl = null;
-  if(t.receipt){ const blob = await idb.get(id).catch(()=>null); if(blob) imgUrl = URL.createObjectURL(blob); }
   const c = CAT[t.category]||CAT.other;
   openModal(`
     <h3>${esc(t.desc)||'明細の詳細'}</h3>
     <div class="muted" style="font-size:13px;margin-bottom:12px">
       ${fmtDate(t.date)} / <span class="num">${yen(t.amount)}</span> / ${c.e} ${c.name} / ${SOURCES[t.source]?.name||t.source}
     </div>
-    <div class="frow"><label>メモ(買った物・値段など。検索対象になります)</label>
-      <textarea id="d-memo" rows="4" placeholder="例: 鶏むね肉 398円、ブロッコリー 158円">${esc(t.memo||'')}</textarea></div>
-    <div class="frow"><label>レシート写真(この端末にのみ保存)</label>
-      ${imgUrl?`<img src="${imgUrl}" alt="レシート" style="max-width:100%;max-height:45vh;object-fit:contain;border-radius:12px;border:1px solid var(--hairline);display:block">`
-              :`<div class="muted" style="font-size:13px;padding:6px 0">まだ添付されていません</div>`}
-      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
-        <button class="btn ghost sm" onclick="pickReceipt('${id}')">📷 ${imgUrl?'写真を差し替え':'写真を添付'}</button>
-        ${imgUrl?`<button class="btn ghost sm" id="ocr-btn" onclick="ocrReceipt('${id}')">🔍 レシートを文字起こし</button>
-        <button class="btn danger sm" onclick="removeReceipt('${id}')">写真を削除</button>`:''}
-      </div>
-      ${imgUrl?`<div class="muted" style="font-size:11px;margin-top:6px">文字起こしはGoogle DriveのOCRを使います(画像は自分のDriveで処理後すぐ削除)。結果はメモ欄に追記されるので、確認して保存してください。</div>`:''}
-      </div>
+    <div class="frow"><label>メモ(商品名・金額など。検索対象になります)</label>
+      <textarea id="d-memo" rows="6" placeholder="例: 鶏むね肉 398円、ブロッコリー 158円">${esc(t.memo||'')}</textarea></div>
+    <div class="frow">
+      <button class="btn ghost sm" id="ocr-btn" onclick="pickReceipt('${id}')">📷 レシートを読み取ってメモに追記</button>
+      <div class="muted" style="font-size:11px;margin-top:6px">写真は読み取りに使うだけで保存しません。店名・商品名・金額だけをメモに残します。</div>
+    </div>
     <div style="display:flex;gap:10px;margin-top:16px">
       <button class="btn ghost" style="flex:1" onclick="closeModal()">閉じる</button>
       <button class="btn" style="flex:2" onclick="saveTxDetail('${id}')">保存</button>
@@ -916,20 +895,17 @@ $('#receiptinput').addEventListener('change', async e=>{
   const t = state.tx.find(x=>x.id===id); if(!t) return;
   // モーダル内のメモの編集中内容を失わないよう先に退避
   const memoEl = $('#d-memo'); if(memoEl) t.memo = memoEl.value.trim();
+  const btn = $('#ocr-btn'); if(btn){ btn.disabled=true; btn.textContent='読み取り中…'; }
   try{
     const blob = await resizeImage(f);
-    await idb.put(id, blob);
-    t.receipt = true;
-    save(); openTxDetail(id); toast('レシートを添付しました');
-  }catch(err){ toast('添付に失敗: '+err.message); }
+    const text = cleanReceiptText(await driveOcr(blob));
+    t.memo = (t.memo ? t.memo+'\n\n' : '') + text;
+    save(); openTxDetail(id); toast('メモに追記しました。内容を確認して保存してください');
+  }catch(err){
+    toast('読み取りに失敗: '+err.message);
+    const b = $('#ocr-btn'); if(b){ b.disabled=false; b.textContent='📷 レシートを読み取ってメモに追記'; }
+  }
 });
-async function removeReceipt(id){
-  const t = state.tx.find(x=>x.id===id); if(!t) return;
-  if(!confirm('レシート写真を削除しますか?')) return;
-  await idb.del(id).catch(()=>{});
-  delete t.receipt;
-  save(); openTxDetail(id); toast('写真を削除しました');
-}
 function saveTxDetail(id){
   const t = state.tx.find(x=>x.id===id); if(!t) return;
   const v = $('#d-memo').value.trim();
@@ -965,19 +941,26 @@ async function driveOcr(blob){
     fetch('https://www.googleapis.com/drive/v3/files/'+f.id, {method:'DELETE', headers:{Authorization:'Bearer '+_gmailToken}}).catch(()=>{});
   }
 }
-/* 詳細画面からの手動文字起こし(添付済み写真をメモ欄へ) */
-async function ocrReceipt(id){
-  const t = state.tx.find(x=>x.id===id); if(!t || !t.receipt) return;
-  const btn = $('#ocr-btn'); if(btn){ btn.disabled=true; btn.textContent='文字起こし中…'; }
-  try{
-    const blob = await idb.get(id);
-    if(!blob) throw new Error('写真が見つかりません');
-    const text = await driveOcr(blob);
-    const memoEl = $('#d-memo');
-    if(memoEl) memoEl.value = (memoEl.value.trim() ? memoEl.value.trim()+'\n\n' : '') + text;
-    toast('文字起こし完了。内容を確認して「保存」を押してください');
-  }catch(e){ toast('文字起こしに失敗: '+e.message); }
-  finally{ const b=$('#ocr-btn'); if(b){ b.disabled=false; b.textContent='🔍 レシートを文字起こし'; } }
+/* OCR全文から「店名・商品名+金額・合計」だけを残す(容量節約・ノイズ除去) */
+function cleanReceiptText(text){
+  const lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
+  const NG = /電話|TEL|FAX|℡|レジ|担当|係:|No[.:：]|NO[.:：]|取引|会員|カード番号|ポイント|point|お預り|お預かり|預り|お?釣り?|クレジット|支払|税率|対象額?|軽減|バーコード|http|www|ありがとう|またの|お越し|営業時間|住所|〒|登録番号|T\d{10,}|残高|チャージ|承認|伝票|端末|区分|発行|控え|\d+-\d+/i;
+  const out = [];
+  const store = lines[0] && !NG.test(lines[0]) ? lines[0] : '';
+  if(store) out.push(store);
+  for(const l of lines.slice(1)){
+    if(NG.test(l)) continue;
+    const m = l.match(/^(.{1,30}?)[\s　]*[¥￥]?([0-9][0-9,]{0,9})(?:円)?$/);
+    if(!m) continue;
+    const name = m[1].replace(/[*＊※◆■]/g,'').trim();
+    const price = normNum(m[2]);
+    if(!name || /^[\d\s,.:\/-]+$/.test(name) || isNaN(price) || price<=0 || price>=1000000) continue;
+    if(/小計|外税|内税|消費税|値引|割引/.test(name)) continue;
+    if(/合計|買上/.test(name)){ out.push(`合計 ${price.toLocaleString('ja-JP')}円`); continue; }
+    out.push(`${name} ${price.toLocaleString('ja-JP')}円`);
+  }
+  // 品目が拾えなかった場合は、ノイズ行だけ除いた全文を残す(何も無いよりまし)
+  return out.length>1 ? out.join('\n') : lines.filter(l=>!NG.test(l)).join('\n');
 }
 
 /* =====================================================
@@ -1000,15 +983,16 @@ $('#scaninput').addEventListener('change', async e=>{
 async function scanReceipt(file){
   toast('レシートを読み取っています…');
   try{
-    const blob = await resizeImage(file);
-    const text = await driveOcr(blob);
-    const info = parseReceiptText(text);
-    _pendingScan = {blob, text, info};
+    const blob = await resizeImage(file);   // 縮小してアップロード(通信量節約)。写真自体は保存しない
+    const raw = await driveOcr(blob);
+    const info = parseReceiptText(raw);
+    const text = cleanReceiptText(raw);
+    _pendingScan = {text, info};
     const cands = matchReceiptTx(info);
     if(cands.length===1){
       const id = cands[0].id;
       _pendingScan = null;
-      await applyReceipt(id, blob, text);
+      applyReceipt(id, text);
       toast(`「${(cands[0].desc||'明細').slice(0,12)}」に自動で紐付けました`);
       openTxDetail(id);
     }else{
@@ -1045,10 +1029,8 @@ function matchReceiptTx({amt, date}){
   }
   return c;
 }
-async function applyReceipt(id, blob, text){
+function applyReceipt(id, text){
   const t = state.tx.find(x=>x.id===id); if(!t) return;
-  await idb.put(id, blob);
-  t.receipt = true;
   t.memo = (t.memo ? t.memo+'\n\n' : '') + text.trim();
   save(); render();
 }
@@ -1070,13 +1052,13 @@ function openReceiptMatchModal(cands){
     ${info.amt?`<div style="margin-top:12px"><button class="btn" style="width:100%" onclick="scanAsCash()">💴 現金支出として新規登録(${yen(info.amt)})</button></div>`:''}
     <div style="margin-top:10px"><button class="btn ghost" style="width:100%" onclick="_pendingScan=null;closeModal()">キャンセル</button></div>`);
 }
-async function chooseScanTx(id){
+function chooseScanTx(id){
   const p = _pendingScan; _pendingScan = null; closeModal();
   if(!p) return;
-  await applyReceipt(id, p.blob, p.text);
+  applyReceipt(id, p.text);
   toast('レシートを紐付けました'); openTxDetail(id);
 }
-async function scanAsCash(){
+function scanAsCash(){
   const p = _pendingScan; _pendingScan = null; closeModal();
   if(!p || !p.info.amt) return;
   const info = p.info;
@@ -1085,7 +1067,7 @@ async function scanAsCash(){
   t.hash = txHash(t);
   state.tx.push(t);
   state.tx.sort((a,b)=> b.date.localeCompare(a.date));
-  await applyReceipt(t.id, p.blob, p.text);
+  applyReceipt(t.id, p.text);
   toast('現金支出として登録しました'); openTxDetail(t.id);
 }
 
@@ -1212,7 +1194,7 @@ function renderImport(){
   <div class="card" style="margin-top:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
     <div style="flex:1;min-width:200px">
       <h2 style="margin-bottom:4px">📷 レシートスキャン</h2>
-      <div class="muted" style="font-size:12.5px;line-height:1.6">レシートを撮ると、合計金額と日付から該当の明細を自動で見つけて、品目をメモ欄に書き込みます。</div>
+      <div class="muted" style="font-size:12.5px;line-height:1.6">レシートを撮ると、合計金額と日付から該当の明細を自動で見つけて、店名・商品名・金額だけをメモ欄に書き込みます。写真は保存しません。</div>
     </div>
     <button class="btn" onclick="startReceiptScan()">スキャンする</button>
   </div>
@@ -1699,7 +1681,7 @@ function renderSettings(){
       <button class="btn ghost sm" onclick="driveRestore()">Driveから復元</button>
     </div>
     <div class="muted" style="font-size:11.5px;line-height:1.7;margin-top:10px">
-      ※初回はGoogle Cloudで「Google Drive API」の有効化(Gmail APIと同じ手順)と、認証画面での再許可が必要です。レシート写真は容量の都合でバックアップに含まれません(端末内のみ)。
+      ※初回はGoogle Cloudで「Google Drive API」の有効化(Gmail APIと同じ手順)と、認証画面での再許可が必要です。
     </div>`
     : `<div class="muted" style="font-size:13px">先に取り込み画面でGmail連携(クライアントID設定)を済ませると使えるようになります。</div>`}
   </div>
