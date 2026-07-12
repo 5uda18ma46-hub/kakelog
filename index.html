@@ -898,8 +898,11 @@ async function openTxDetail(id){
               :`<div class="muted" style="font-size:13px;padding:6px 0">まだ添付されていません</div>`}
       <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
         <button class="btn ghost sm" onclick="pickReceipt('${id}')">📷 ${imgUrl?'写真を差し替え':'写真を添付'}</button>
-        ${imgUrl?`<button class="btn danger sm" onclick="removeReceipt('${id}')">写真を削除</button>`:''}
-      </div></div>
+        ${imgUrl?`<button class="btn ghost sm" id="ocr-btn" onclick="ocrReceipt('${id}')">🔍 レシートを文字起こし</button>
+        <button class="btn danger sm" onclick="removeReceipt('${id}')">写真を削除</button>`:''}
+      </div>
+      ${imgUrl?`<div class="muted" style="font-size:11px;margin-top:6px">文字起こしはGoogle DriveのOCRを使います(画像は自分のDriveで処理後すぐ削除)。結果はメモ欄に追記されるので、確認して保存してください。</div>`:''}
+      </div>
     <div style="display:flex;gap:10px;margin-top:16px">
       <button class="btn ghost" style="flex:1" onclick="closeModal()">閉じる</button>
       <button class="btn" style="flex:2" onclick="saveTxDetail('${id}')">保存</button>
@@ -931,6 +934,44 @@ function saveTxDetail(id){
   const v = $('#d-memo').value.trim();
   if(v) t.memo = v; else delete t.memo;
   save(); closeModal(); render(); toast('保存しました');
+}
+/* レシートOCR: 画像を自分のDriveへGoogleドキュメントとして一時アップロード(=Googleが文字起こし)
+   → テキストをエクスポートしてメモ欄に追記 → 一時ファイルを削除 */
+async function ocrReceipt(id){
+  const t = state.tx.find(x=>x.id===id); if(!t || !t.receipt) return;
+  const btn = $('#ocr-btn'); if(btn){ btn.disabled=true; btn.textContent='文字起こし中…'; }
+  try{
+    if(!_gmailToken) await gmailAuth();
+    const blob = await idb.get(id);
+    if(!blob) throw new Error('写真が見つかりません');
+    const b64 = await new Promise((res,rej)=>{
+      const r = new FileReader();
+      r.onload = ()=>res(String(r.result).split(',')[1]);
+      r.onerror = ()=>rej(new Error('画像の読み込みに失敗しました'));
+      r.readAsDataURL(blob);
+    });
+    const boundary = 'kakelogocr';
+    const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n`+
+      JSON.stringify({name:'kakelog-ocr-temp', mimeType:'application/vnd.google-apps.document'})+
+      `\r\n--${boundary}\r\nContent-Type: image/jpeg\r\nContent-Transfer-Encoding: base64\r\n\r\n`+b64+`\r\n--${boundary}--`;
+    const up = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&ocrLanguage=ja', {
+      method:'POST', headers:{Authorization:'Bearer '+_gmailToken, 'Content-Type':'multipart/related; boundary='+boundary}, body});
+    if(!up.ok) throw new Error('Drive APIエラー('+up.status+')'+(up.status===403?' — 設定画面の案内に沿ってGoogle Drive APIを有効化してください':''));
+    const f = await up.json();
+    try{
+      const ex = await fetch('https://www.googleapis.com/drive/v3/files/'+f.id+'/export?mimeType=text/plain', {headers:{Authorization:'Bearer '+_gmailToken}});
+      if(!ex.ok) throw new Error('テキスト変換エラー('+ex.status+')');
+      let text = (await ex.text()).replace(/^﻿/,'').replace(/\r/g,'').replace(/\n{3,}/g,'\n\n').trim();
+      if(!text) throw new Error('文字を読み取れませんでした(写真の明るさ・角度を変えてお試しください)');
+      const memoEl = $('#d-memo');
+      if(memoEl) memoEl.value = (memoEl.value.trim() ? memoEl.value.trim()+'\n\n' : '') + text;
+      toast('文字起こし完了。内容を確認して「保存」を押してください');
+    }finally{
+      // 一時ファイルを削除(失敗しても本処理には影響させない)
+      fetch('https://www.googleapis.com/drive/v3/files/'+f.id, {method:'DELETE', headers:{Authorization:'Bearer '+_gmailToken}}).catch(()=>{});
+    }
+  }catch(e){ toast('文字起こしに失敗: '+e.message); }
+  finally{ const b=$('#ocr-btn'); if(b){ b.disabled=false; b.textContent='🔍 レシートを文字起こし'; } }
 }
 
 /* ---------- 手動入力(現金) ---------- */
