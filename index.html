@@ -961,23 +961,69 @@ async function driveOcr(blob){
     fetch('https://www.googleapis.com/drive/v3/files/'+f.id, {method:'DELETE', headers:{Authorization:'Bearer '+_gmailToken}}).catch(()=>{});
   }
 }
-/* OCR全文から「店名・商品名+金額・合計」だけを残す(容量節約・ノイズ除去) */
+/* 先頭付近の行から店名を推定(店名辞書と照合、なければ1行目) */
+function detectStoreLine(lines){
+  for(const l of lines.slice(0,8)){
+    for(const r of DEFAULT_RULES){
+      if(r.kw.length>=3 && r.cat!=='transfer' && l.includes(r.kw)) return l;
+    }
+  }
+  return lines[0]||'';
+}
+/* OCR全文から「店名・商品名+金額・合計」だけを残す(容量節約・ノイズ除去)。
+   商品名と金額が別行になるレシート(業務スーパー等)は、商品名行→金額行をペアリングして復元する */
 function cleanReceiptText(text){
   const lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
-  const NG = /電話|TEL|FAX|℡|レジ|担当|係:|No[.:：]|NO[.:：]|取引|会員|カード番号|ポイント|point|お預り|お預かり|預り|お?釣り?|クレジット|支払|税率|対象額?|軽減|バーコード|http|www|ありがとう|またの|お越し|営業時間|住所|〒|登録番号|T\d{10,}|残高|チャージ|承認|伝票|端末|区分|発行|控え|\d+-\d+/i;
+  const NG = /電話|TEL|FAX|℡|レジ|担当|係:|No[.:：№]|NO[.:：]|取引|会員|品質|価格|株式会社|\(有\)|カード番号|point|バーコード|http|www|ありがとう|またの|お越し|営業時間|住所|〒|登録番号|T\d{10,}|承認|伝票|端末|区分|発行|控え|点数|\d+-\d+/i;
+  const SKIP_LABEL = /小計|外税|内税|消費税|税率|税額|対象額?|軽減|値引|割引|お預り|お預かり|預り|お?釣り?|ポイント|残高|チャージ|クレジット|現金|NFC|ＮＦＣ|iD|QUIC|Suica|交通系|PayPay|ペイペイ|楽天ペイ|支払/i;
+  const TOTAL_LABEL = /合計|お?買上げ?(合)?計/;
+  const isPriceOnly = l => { const m=l.match(/^[¥￥]?\s*([0-9][0-9,]{0,9})\s*円?$/); return m? normNum(m[1]) : null; };
+  const stripCode = s => s.replace(/^0*\d{3,7}\s*/,'').replace(/[*＊※◆■]/g,'').trim();
+  const hasLetters = s => /[ぁ-んァ-ヶ一-龠A-Za-zー]/.test(s);
+
+  const store = detectStoreLine(lines);
   const out = [];
-  const store = lines[0] && !NG.test(lines[0]) ? lines[0] : '';
-  if(store) out.push(store);
-  for(const l of lines.slice(1)){
-    if(NG.test(l)) continue;
-    const m = l.match(/^(.{1,30}?)[\s　]*[¥￥]?([0-9][0-9,]{0,9})(?:円)?$/);
-    if(!m) continue;
-    const name = m[1].replace(/[*＊※◆■]/g,'').trim();
-    const price = normNum(m[2]);
-    if(!name || /^[\d\s,.:\/-]+$/.test(name) || isNaN(price) || price<=0 || price>=1000000) continue;
-    if(/小計|外税|内税|消費税|値引|割引/.test(name)) continue;
-    if(/合計|買上/.test(name)){ out.push(`合計 ${price.toLocaleString('ja-JP')}円`); continue; }
-    out.push(`${name} ${price.toLocaleString('ja-JP')}円`);
+  if(store && hasLetters(store)) out.push(stripCode(store).slice(0,30));
+  let pendingName = '';        // 金額待ちの商品名
+  const directives = [];       // 次の金額行の扱い: 'skip' | 'total'
+
+  for(const raw of lines){
+    const l = raw;
+    if(l===store) continue;
+    if(/JAN/i.test(l) && /\d{6,}/.test(l)) continue;                       // JANコード行
+    if(/^\d+\s*[コ個]\s*[XxＸ×]/.test(l)) continue;                        // 数量×単価行
+    if(/^[\d\s,.:\/\-*＊]+$/.test(l) && isPriceOnly(l)===null) continue;   // 数字だけのコード行
+    const price = isPriceOnly(l);
+    if(price!==null){
+      const d = directives.shift();
+      if(d==='total'){ if(price>0) out.push(`合計 ${price.toLocaleString('ja-JP')}円`); }
+      else if(d==='skip'){ /* 小計・税額などの金額 → 捨てる */ }
+      else if(pendingName && price>0 && price<1000000){ out.push(`${pendingName} ${price.toLocaleString('ja-JP')}円`); }
+      pendingName = '';
+      continue;
+    }
+    // 金額を含まないラベル行
+    const hasNum = /[0-9][0-9,]*\s*円?\s*$/.test(l);
+    if(!hasNum && TOTAL_LABEL.test(l)){ directives.push('total'); pendingName=''; continue; }
+    if(!hasNum && SKIP_LABEL.test(l)){ directives.push('skip'); pendingName=''; continue; }
+    if(NG.test(l)){ pendingName=''; continue; }
+    // 同一行に商品名+金額があるパターン
+    const m = l.match(/^(.{1,40}?)[\s　]*[¥￥]?([0-9][0-9,]{0,9})(?:円)?$/);
+    if(m){
+      const name = stripCode(m[1]);
+      const p = normNum(m[2]);
+      if(!hasLetters(name) || isNaN(p) || p<=0 || p>=1000000){ continue; }
+      if(SKIP_LABEL.test(name)) continue;
+      if(TOTAL_LABEL.test(name)){ out.push(`合計 ${p.toLocaleString('ja-JP')}円`); continue; }
+      out.push(`${name.slice(0,30)} ${p.toLocaleString('ja-JP')}円`);
+      pendingName = '';
+      continue;
+    }
+    // 商品名だけの行 → 次の金額行とペアにする
+    if(hasLetters(l) && !SKIP_LABEL.test(l) && !TOTAL_LABEL.test(l)){
+      const name = stripCode(l);
+      if(name && hasLetters(name)) pendingName = name.slice(0,30);
+    }
   }
   // 品目が拾えなかった場合は、ノイズ行だけ除いた全文を残す(何も無いよりまし)
   return out.length>1 ? out.join('\n') : lines.filter(l=>!NG.test(l)).join('\n');
@@ -1023,11 +1069,22 @@ async function scanReceipt(file){
 /* OCRテキストから合計金額・日付・店名を推定 */
 function parseReceiptText(text){
   const lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
+  const priceOnly = l => { const m=l.match(/^[¥￥]?\s*([0-9][0-9,]{0,9})\s*円?$/); return m? normNum(m[1]) : null; };
   let amt = null;
-  for(const l of lines){
-    if(/小計|お預り|お預かり|釣|ポイント|残高|値引/.test(l)) continue;
+  for(let i=0;i<lines.length;i++){
+    const l = lines[i];
+    if(/小計|お預り|お預かり|釣|ポイント|残高|値引|税/.test(l)) continue;
+    // 同一行に「合計 ¥1,068」があるパターン
     const m = l.match(/(?:合計|お買上げ?計|ご?請求|クレジット|計)\D{0,8}?[¥￥]?\s*([0-9][0-9,]*)/);
-    if(m){ const n = normNum(m[1]); if(!isNaN(n) && n>0){ amt = n; if(/合計/.test(l)) break; } }
+    if(m){ const n = normNum(m[1]); if(!isNaN(n) && n>0){ amt = n; if(/合計/.test(l)) break; } continue; }
+    // 「合計」ラベルだけの行 → 直後1〜2行の金額行を採用するパターン
+    if(/^(合計|お?買上げ?(合)?計)$/.test(l)){
+      for(let j=i+1; j<Math.min(i+3, lines.length); j++){
+        const p = priceOnly(lines[j]);
+        if(p!==null && p>0){ amt = p; break; }
+      }
+      if(amt!=null) break;
+    }
   }
   if(amt==null){
     let mx = NaN;
@@ -1036,7 +1093,7 @@ function parseReceiptText(text){
   }
   const dm = text.match(/(20\d{2})[年\/\-.](\d{1,2})[月\/\-.](\d{1,2})/);
   const date = dm ? `${dm[1]}-${String(+dm[2]).padStart(2,'0')}-${String(+dm[3]).padStart(2,'0')}` : null;
-  return {amt, date, store: lines[0]||''};
+  return {amt, date, store: detectStoreLine(lines)};
 }
 /* 同額の支出明細を探す(日付が近いものを優先) */
 function matchReceiptTx({amt, date}){
