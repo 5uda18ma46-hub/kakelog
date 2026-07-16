@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#2a78d6">
 <link rel="manifest" href="manifest.webmanifest">
@@ -42,6 +42,7 @@ body{
   font-family:system-ui,-apple-system,"Segoe UI","Hiragino Sans","Noto Sans JP",sans-serif;
   background:var(--page); color:var(--ink-1); font-size:15px; line-height:1.55;
   -webkit-font-smoothing:antialiased;
+  touch-action:pan-x pan-y;  /* ピンチズーム・ダブルタップ拡大を無効化(スクロールは許可) */
 }
 button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
 input,select,textarea{font:inherit;color:inherit}
@@ -1900,6 +1901,10 @@ function removeDemo(){
 }
 
 /* ---------- init ---------- */
+// iOS Safariはviewport指定だけではピンチズームを止められないため、ジェスチャー自体を無効化する
+// (ダブルタップ拡大は body の touch-action:pan-x pan-y で無効化される)
+document.addEventListener('gesturestart', e=>e.preventDefault());
+document.addEventListener('gesturechange', e=>e.preventDefault());
 render();
 armAutoSync();
 </script>
