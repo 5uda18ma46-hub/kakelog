@@ -140,6 +140,13 @@ input,select,textarea{font:inherit;color:inherit}
 .ic svg{width:19px;height:19px;color:var(--accent)}
 .mic{display:inline-flex;vertical-align:-3px}
 .mic svg{width:16px;height:16px}
+.mic.h2i{margin-right:6px;vertical-align:-3.5px}
+.mic.h2i svg{width:15px;height:15px}
+.btn svg{width:16px;height:16px;flex-shrink:0}
+.empty .big svg,.dropzone .big svg{width:44px;height:44px;color:var(--ink-3)}
+.memoflag{display:inline-flex;vertical-align:-2px;margin-left:5px;color:var(--ink-3)}
+.memoflag svg{width:13px;height:13px}
+.notice .mic{flex-shrink:0;margin-top:2px}
 .txrow .bd{flex:1;min-width:0}
 .txrow .ds{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .txrow .meta{display:flex;gap:6px;align-items:center;margin-top:2px}
@@ -292,33 +299,33 @@ const LS_KEY = 'kakelog:v1';
 
 /* ---------- カテゴリ定義 (dot = チャート用固定スロット) ---------- */
 const CATS = [
-  {id:'food',     name:'食費',       e:'🛒', slot:'--s1'},
-  {id:'eatout',   name:'外食',       e:'🍜', slot:'--s2'},
-  {id:'daily',    name:'日用品',     e:'🧴', slot:'--s3'},
-  {id:'transport',name:'交通',       e:'🚃', slot:'--s4'},
-  {id:'hobby',    name:'趣味・娯楽', e:'🎮', slot:'--s5'},
-  {id:'util',     name:'水道光熱',   e:'💡', slot:'--s6'},
-  {id:'comm',     name:'通信',       e:'📱', slot:'--s7'},
-  {id:'house',    name:'住居',       e:'🏠', slot:'--s8'},
-  {id:'clothes',  name:'衣服・美容', e:'👕', slot:'--fold'},
-  {id:'health',   name:'健康・医療', e:'💪', slot:'--fold'},
-  {id:'social',   name:'交際費',     e:'🎁', slot:'--fold'},
-  {id:'invest',   name:'投資',       e:'📈', slot:'--fold'},
-  {id:'other',    name:'その他',     e:'📦', slot:'--fold'},
-  {id:'transfer', name:'振替',       e:'🔁', slot:'--fold'},  // 集計から除外
-  {id:'income',   name:'収入',       e:'💰', slot:'--fold'},
+  {id:'food',     name:'食費',       slot:'--s1'},
+  {id:'eatout',   name:'外食',       slot:'--s2'},
+  {id:'daily',    name:'日用品',     slot:'--s3'},
+  {id:'transport',name:'交通',       slot:'--s4'},
+  {id:'hobby',    name:'趣味・娯楽', slot:'--s5'},
+  {id:'util',     name:'水道光熱',   slot:'--s6'},
+  {id:'comm',     name:'通信',       slot:'--s7'},
+  {id:'house',    name:'住居',       slot:'--s8'},
+  {id:'clothes',  name:'衣服・美容', slot:'--fold'},
+  {id:'health',   name:'健康・医療', slot:'--fold'},
+  {id:'social',   name:'交際費',     slot:'--fold'},
+  {id:'invest',   name:'投資',       slot:'--fold'},
+  {id:'other',    name:'その他',     slot:'--fold'},
+  {id:'transfer', name:'振替',       slot:'--fold'},  // 集計から除外
+  {id:'income',   name:'収入',       slot:'--fold'},
 ];
 const CAT = Object.fromEntries(CATS.map(c=>[c.id,c]));
 const EXPENSE_CATS = CATS.filter(c=>!['transfer','income'].includes(c.id));
 
 const SOURCES = {
-  'rakuten-card':{name:'楽天カード', e:'💳'},
-  'rakuten-pay' :{name:'楽天Pay',   e:'📲'},
-  'rakuten-bank':{name:'楽天銀行',   e:'🏦'},
-  'rakuten-sec' :{name:'楽天証券',   e:'📈'},
-  'paypay'      :{name:'PayPay',    e:'🅿️'},
-  'cash'        :{name:'現金',       e:'💴'},
-  'unknown'     :{name:'その他',     e:'🧾'},  // レシートスキャンで登録した経路未確定の支出
+  'rakuten-card':{name:'楽天カード'},
+  'rakuten-pay' :{name:'楽天Pay'},
+  'rakuten-bank':{name:'楽天銀行'},
+  'rakuten-sec' :{name:'楽天証券'},
+  'paypay'      :{name:'PayPay'},
+  'cash'        :{name:'現金'},
+  'unknown'     :{name:'その他'},  // レシートスキャンで登録した経路未確定の支出
 };
 
 /* ---------- ミニマルなラインアイコン(SVG) ---------- */
@@ -345,6 +352,17 @@ const ICON_PATHS = {
   wallet:   '<rect x="3.5" y="6.5" width="17" height="12.5" rx="2"/><path d="M20.5 11h-4.2a1.9 1.9 0 0 0 0 3.8h4.2"/>',
   cash:     '<rect x="3" y="6.8" width="18" height="10.8" rx="1.8"/><circle cx="12" cy="12.2" r="2.7"/><path d="M6.2 12.2h.01M17.8 12.2h.01"/>',
   receipt:  '<path d="M6.5 3.5h11v17l-1.8-1.4-1.9 1.4-1.8-1.4-1.9 1.4-1.8-1.4-1.8 1.4v-17z"/><path d="M9.5 8.5h5M9.5 12h5"/>',
+  camera:   '<path d="M4 8.5A1.5 1.5 0 0 1 5.5 7H8l1.5-2h5L16 7h2.5A1.5 1.5 0 0 1 20 8.5V18a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18V8.5z"/><circle cx="12" cy="13" r="3.5"/>',
+  pencil:   '<path d="m14.5 5 4.5 4.5L8.5 20H4v-4.5L14.5 5z"/><path d="m12.5 7 4.5 4.5"/>',
+  mail:     '<rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="m4.5 7.5 7.5 5.5 7.5-5.5"/>',
+  cloud:    '<path d="M7 18.5a4 4 0 0 1-.6-7.9 5.5 5.5 0 0 1 10.8-1.1A4.2 4.2 0 0 1 16.8 18.5H7z"/>',
+  lock:     '<rect x="5.5" y="10.5" width="13" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>',
+  key:      '<circle cx="8" cy="15.5" r="4"/><path d="m11 12.5 8-8"/><path d="M16 7.5 19 10.5"/><path d="m14 9.5 2 2"/>',
+  note:     '<path d="M5.5 4.5h13v11l-4 4h-9v-15z"/><path d="M14.5 19.5v-4h4"/>',
+  info:     '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5"/><path d="M12 7.8h.01"/>',
+  alert:    '<path d="M12 4 3 19.5h18L12 4z"/><path d="M12 10.5v4"/><path d="M12 16.8h.01"/>',
+  down:     '<path d="M12 4v10"/><path d="m7.5 9.5 4.5 4.5 4.5-4.5"/><path d="M4.5 19.5h15"/>',
+  wave:     '<path d="M4 13c1.5-1.5 3-1.5 4.5 0s3 1.5 4.5 0 3-1.5 4.5 0 2 1.2 2.5.8"/><path d="M4 8.5c1.5-1.5 3-1.5 4.5 0s3 1.5 4.5 0 3-1.5 4.5 0 2 1.2 2.5.8"/><path d="M4 17.5c1.5-1.5 3-1.5 4.5 0s3 1.5 4.5 0 3-1.5 4.5 0 2 1.2 2.5.8"/>',
 };
 const ICONS = Object.fromEntries(Object.entries(ICON_PATHS).map(([k,v])=>[k, SVGI(v)]));
 function catIcon(id){ return ICONS[id] || ICONS.other; }
@@ -382,10 +400,10 @@ function defaultState(){
   return {
     tx: [],
     accounts: [
-      {id:'rakuten-bank', name:'楽天銀行',   e:'🏦', balance:null, updatedAt:null, auto:true},
-      {id:'rakuten-sec',  name:'楽天証券',   e:'📈', balance:null, updatedAt:null},
-      {id:'paypay',       name:'PayPay残高', e:'🅿️', balance:null, updatedAt:null},
-      {id:'cash',         name:'現金',       e:'💴', balance:null, updatedAt:null},
+      {id:'rakuten-bank', name:'楽天銀行',   balance:null, updatedAt:null, auto:true},
+      {id:'rakuten-sec',  name:'楽天証券',   balance:null, updatedAt:null},
+      {id:'paypay',       name:'PayPay残高', balance:null, updatedAt:null},
+      {id:'cash',         name:'現金',       balance:null, updatedAt:null},
     ],
     rules: [],           // 学習ルール {kw, cat}
     settings: {demoLoaded:false},
@@ -708,7 +726,7 @@ function renderHome(){
     return `
     <div class="pagehead"><h1>ホーム</h1></div>
     <div class="card"><div class="empty">
-      <div class="big">👋</div>
+      <div class="big">${ICONS.wallet}</div>
       <p><b>KakeLogへようこそ。</b><br>楽天カード・楽天銀行・PayPayの明細CSVを取り込むと、<br>現金以外の支出が自動で記録されます。</p>
       <button class="btn" onclick="go('import')">CSVを取り込む</button>
       <div style="height:10px"></div>
@@ -724,7 +742,7 @@ function renderHome(){
 
   return `
   <div class="pagehead"><h1>ホーム</h1>${monthNavHTML()}</div>
-  ${state.settings.demoLoaded?`<div class="notice">🧪 サンプルデータを表示中です。設定からいつでも削除できます。</div>`:''}
+  ${state.settings.demoLoaded?`<div class="notice"><span class="mic">${ICONS.info}</span><span>サンプルデータを表示中です。設定からいつでも削除できます。</span></div>`:''}
   <div class="kpirow">
     <div class="kpi"><div class="t">支出</div><div class="v num">${yen(s.exp)}</div>
       <div class="d">${expDelta==null?'前月データなし':`前月比 <span class="num ${expDelta<=0?'pos':'neg'}">${expDelta<=0?'▼':'▲'}${yen(Math.abs(expDelta)).replace('¥','¥')}</span>`}</div></div>
@@ -849,7 +867,7 @@ function renderTx(){
       ${Object.entries(SOURCES).map(([id,s])=>`<option value="${id}" ${txFilter.src===id?'selected':''}>${s.name}</option>`).join('')}
     </select>
   </div>
-  ${groups || `<div class="card"><div class="empty"><div class="big">🗒️</div><p>この条件の明細はありません</p></div></div>`}`;
+  ${groups || `<div class="card"><div class="empty"><div class="big">${ICONS.receipt}</div><p>この条件の明細はありません</p></div></div>`}`;
 }
 let _rt; function debouncedRender(){ clearTimeout(_rt); _rt=setTimeout(render,250); }
 
@@ -858,7 +876,7 @@ function txRowHTML(t){
   return `<div class="txrow">
     <div class="ic">${catIcon(t.category)}</div>
     <div class="bd" onclick="openTxDetail('${t.id}')" style="cursor:pointer" title="タップで詳細・メモ・レシート">
-      <div class="ds">${esc(t.desc)||'<span class="muted">(内容なし)</span>'}${t.memo?' 📝':''}</div>
+      <div class="ds">${esc(t.desc)||'<span class="muted">(内容なし)</span>'}${t.memo?`<span class="memoflag">${ICONS.note}</span>`:''}</div>
       <div class="meta">
         <button class="chip" onclick="event.stopPropagation();openCatPicker('${t.id}')" title="カテゴリを変更">${c.name}</button>
         <span class="srcbadge">${SOURCES[t.source]?.name||t.source}</span>
@@ -935,7 +953,7 @@ function openTxDetail(id){
     <div class="frow"><label>メモ(商品名・金額など。検索対象になります)</label>
       <textarea id="d-memo" rows="6" placeholder="例: 鶏むね肉 398円、ブロッコリー 158円">${esc(t.memo||'')}</textarea></div>
     <div class="frow">
-      <button class="btn ghost sm" id="ocr-btn" onclick="pickReceipt('${id}')">📷 レシートを読み取ってメモに追記</button>
+      <button class="btn ghost sm" id="ocr-btn" onclick="pickReceipt('${id}')">${ICONS.camera} レシートを読み取ってメモに追記</button>
       <div class="muted" style="font-size:11px;margin-top:6px">写真は読み取りに使うだけで保存しません。店名・商品名・金額だけをメモに残します。</div>
     </div>
     <div style="display:flex;gap:10px;margin-top:16px">
@@ -958,7 +976,7 @@ $('#receiptinput').addEventListener('change', async e=>{
     save(); openTxDetail(id); toast('メモに追記しました。内容を確認して保存してください');
   }catch(err){
     toast('読み取りに失敗: '+err.message);
-    const b = $('#ocr-btn'); if(b){ b.disabled=false; b.textContent='📷 レシートを読み取ってメモに追記'; }
+    const b = $('#ocr-btn'); if(b){ b.disabled=false; b.innerHTML=ICONS.camera+' レシートを読み取ってメモに追記'; }
   }
 });
 function saveTxDetail(id){
@@ -1072,8 +1090,8 @@ function openFabMenu(){
   openModal(`
     <h3>記録を追加</h3>
     <div style="display:flex;flex-direction:column;gap:10px">
-      <button class="btn" onclick="closeModal();startReceiptScan()">📷 レシートをスキャン(自動で明細に紐付け)</button>
-      <button class="btn ghost" onclick="closeModal();openTxModal()">✏️ 現金の支出を手入力</button>
+      <button class="btn" onclick="closeModal();startReceiptScan()">${ICONS.camera} レシートをスキャン(自動で明細に紐付け)</button>
+      <button class="btn ghost" onclick="closeModal();openTxModal()">${ICONS.pencil} 現金の支出を手入力</button>
     </div>`);
 }
 function startReceiptScan(){ $('#scaninput').click(); }
@@ -1162,7 +1180,7 @@ function openReceiptMatchModal(cands){
         <span class="num">${yen(t.amount)}</span></button>`).join('') || '<div class="muted" style="font-size:13px">明細がありません</div>'}
     </div>
     ${info.amt?`<div style="margin-top:12px">
-      <button class="btn" style="width:100%" onclick="scanAsNew()">🧾 支出として新規登録(${yen(info.amt)})</button>
+      <button class="btn" style="width:100%" onclick="scanAsNew()">${ICONS.receipt} 支出として新規登録(${yen(info.amt)})</button>
       <div class="muted" style="font-size:11px;margin-top:6px;text-align:center">支払い経路は未確定のまま登録されます。後からPayPayのCSVや通知メールで同じ支出が入ると自動で合体します。</div>
     </div>`:''}
     <div style="margin-top:10px"><button class="btn ghost" style="width:100%" onclick="_pendingScan=null;closeModal()">キャンセル</button></div>`);
@@ -1239,7 +1257,7 @@ function renderImport(){
   const lastSync = g.lastSync ? new Date(g.lastSync).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : null;
   const gmailCard = g.clientId ? `
   <div class="card" style="margin-bottom:14px">
-    <h2>📧 Gmail自動連携 — 接続済み</h2>
+    <h2><span class="mic h2i">${ICONS.mail}</span>Gmail自動連携 — 接続済み</h2>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
       <button class="btn" id="sync-btn" onclick="syncGmail()">今すぐ同期</button>
       <button class="btn ghost sm" onclick="rescanGmail()" title="処理済みメールも含めて全期間を解析し直す">全期間を再スキャン</button>
@@ -1254,17 +1272,17 @@ function renderImport(){
     </label>
     ${_lastFailures.length?`
     <details open style="margin-bottom:12px">
-      <summary style="cursor:pointer;font-size:13px;font-weight:700;padding:6px 0;color:var(--bad)">⚠️ 解析できなかったメール ${_lastFailures.length}通(最大10通まで表示)</summary>
+      <summary style="cursor:pointer;font-size:13px;font-weight:700;padding:6px 0;color:var(--bad)"><span class="mic h2i">${ICONS.alert}</span>解析できなかったメール ${_lastFailures.length}通(最大10通まで表示)</summary>
       <div style="font-size:12.5px;color:var(--ink-2);margin:4px 0 8px">「内容をコピー」を押して、開発チャットにそのまま貼り付けてください。実際のメール形式に合わせて解析を修正できます。</div>
       <button class="btn ghost sm" onclick="copyFailures()">内容をコピー</button>
       <pre style="font-size:11px;line-height:1.5;background:var(--page);border:1px solid var(--hairline);border-radius:10px;padding:10px;margin-top:8px;max-height:240px;overflow:auto;white-space:pre-wrap">${esc(failuresText())}</pre>
     </details>`:''}
-    ${g.bankNotice?`<div class="notice" style="margin:0 0 12px">🏦 楽天銀行の入出金メールを検知しました(最終: ${esc(g.bankNotice.last)})。銀行メールには金額が記載されないため、明細と残高は<b>入出金CSVの取り込み</b>で更新してください。</div>`:''}
+    ${g.bankNotice?`<div class="notice" style="margin:0 0 12px"><span class="mic">${ICONS.bank}</span><span>楽天銀行の入出金メールを検知しました(最終: ${esc(g.bankNotice.last)})。銀行メールには金額が記載されないため、明細と残高は<b>入出金CSVの取り込み</b>で更新してください。</span></div>`:''}
     <div style="font-size:12.5px;color:var(--ink-2);line-height:1.7;margin-bottom:10px">
       対象: 楽天カード「カード利用のお知らせ」/ 楽天ペイ「お支払い完了のお知らせ」(証券のカード積立も自動判別)。同じ決済がカードとペイの両方から来ても自動で1件にまとめます。楽天銀行のメールは金額非記載のため検知のみ行い、明細は月1回のCSVで取り込みます。
     </div>
     <details>
-      <summary style="cursor:pointer;font-size:13px;font-weight:700;padding:6px 0">📮 通知メールが届いていない場合の設定</summary>
+      <summary style="cursor:pointer;font-size:13px;font-weight:700;padding:6px 0"><span class="mic h2i">${ICONS.mail}</span>通知メールが届いていない場合の設定</summary>
       <ol style="font-size:13px;color:var(--ink-2);padding:8px 0 4px 22px;line-height:1.8">
         <li><b>楽天カード:</b> 楽天e-NAVI →「カード利用お知らせメール」を配信登録(登録後の利用分から、利用の翌日頃に届きます)</li>
         <li><b>楽天銀行:</b> 入出金メールは金額が記載されない仕様のため、明細はCSV取り込みで補完してください(メールは検知・リマインドに使われます)</li>
@@ -1273,12 +1291,12 @@ function renderImport(){
     <div style="margin-top:10px"><button class="btn danger sm" onclick="disconnectGmail()">連携を解除</button></div>
   </div>` : `
   <div class="card" style="margin-bottom:14px">
-    <h2>📧 Gmail自動連携をはじめる</h2>
+    <h2><span class="mic h2i">${ICONS.mail}</span>Gmail自動連携をはじめる</h2>
     <div style="font-size:13.5px;color:var(--ink-2);line-height:1.8;margin-bottom:12px">
       楽天カード・楽天銀行の<b>利用通知メール</b>をGmailから自動で読み取り、明細化します。一度設定すれば、あとはアプリを開くだけ。メールは読み取り専用(gmail.readonly)で、本文が外部に送られることはありません。
     </div>
     <details style="margin-bottom:12px">
-      <summary style="cursor:pointer;font-size:13.5px;font-weight:700;padding:6px 0">🔑 初回設定の手順(Google Cloud、無料・約10分)</summary>
+      <summary style="cursor:pointer;font-size:13.5px;font-weight:700;padding:6px 0"><span class="mic h2i">${ICONS.key}</span>初回設定の手順(Google Cloud、無料・約10分)</summary>
       <ol style="font-size:13px;color:var(--ink-2);padding:8px 0 4px 22px;line-height:1.9">
         <li><a href="https://console.cloud.google.com/" target="_blank" style="color:var(--accent)">console.cloud.google.com</a> にGoogleアカウントでログインし、新しいプロジェクトを作成(名前は「kakelog」など)</li>
         <li>「APIとサービス」→「ライブラリ」で <b>Gmail API</b> を検索して「有効にする」</li>
@@ -1298,10 +1316,10 @@ function renderImport(){
   </div>`;
   return `
   <div class="pagehead"><h1>取り込み</h1></div>
-  <div class="notice">🔒 メール・CSVはブラウザ内だけで処理され、データはこの端末にのみ保存されます。</div>
+  <div class="notice"><span class="mic">${ICONS.lock}</span><span>メール・CSVはブラウザ内だけで処理され、データはこの端末にのみ保存されます。</span></div>
   ${gmailCard}
   <div class="dropzone" id="dropzone" onclick="$('#fileinput').click()">
-    <div class="big">📄</div>
+    <div class="big">${ICONS.down}</div>
     <b>明細CSVをここにドロップ</b><br>
     <span style="font-size:13px">またはタップしてファイルを選択(複数可)</span><br>
     <span class="muted" style="font-size:12px">楽天カード / 楽天銀行 / PayPay のCSVを自動判別・重複は自動スキップ</span>
@@ -1309,7 +1327,7 @@ function renderImport(){
 
   <div class="card" style="margin-top:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
     <div style="flex:1;min-width:200px">
-      <h2 style="margin-bottom:4px">📷 レシートスキャン</h2>
+      <h2 style="margin-bottom:4px"><span class="mic h2i">${ICONS.camera}</span>レシートスキャン</h2>
       <div class="muted" style="font-size:12.5px;line-height:1.6">レシートを撮ると、合計金額と日付から該当の明細を自動で見つけて、店名・商品名・金額だけをメモ欄に書き込みます。写真は保存しません。</div>
     </div>
     <button class="btn" onclick="startReceiptScan()">スキャンする</button>
@@ -1786,7 +1804,7 @@ function renderSettings(){
     : '<div class="muted" style="font-size:13px">明細のカテゴリを変更すると、店名キーワードを自動で学習してここに表示されます。</div>'}
   </div>
   <div class="card">
-    <h2>☁️ Google Driveバックアップ</h2>
+    <h2><span class="mic h2i">${ICONS.cloud}</span>Google Driveバックアップ</h2>
     ${state.gmail.clientId ? `
     <label style="display:flex;align-items:center;gap:8px;font-size:14px;padding:4px 0 10px">
       <input type="checkbox" ${state.drive.enabled?'checked':''} onchange="toggleDrive(this.checked)">
