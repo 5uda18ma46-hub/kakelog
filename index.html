@@ -137,6 +137,9 @@ input,select,textarea{font:inherit;color:inherit}
   background:var(--surface-1);border:1px solid var(--hairline);margin-bottom:6px;
 }
 .txrow .ic{width:38px;height:38px;border-radius:11px;background:var(--accent-soft);display:grid;place-items:center;font-size:18px;flex-shrink:0}
+.ic svg{width:19px;height:19px;color:var(--accent)}
+.mic{display:inline-flex;vertical-align:-3px}
+.mic svg{width:16px;height:16px}
 .txrow .bd{flex:1;min-width:0}
 .txrow .ds{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .txrow .meta{display:flex;gap:6px;align-items:center;margin-top:2px}
@@ -239,7 +242,8 @@ input,select,textarea{font:inherit;color:inherit}
   display:flex;flex-direction:column;align-items:center;gap:3px;padding:10px 4px;
   border:1px solid var(--hairline);border-radius:12px;font-size:11.5px;font-weight:600;background:var(--page);
 }
-.catgrid button .e{font-size:20px}
+.catgrid button .e{font-size:20px;display:flex}
+.catgrid button .e svg{width:21px;height:21px}
 .catgrid button.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
 
 /* toast */
@@ -316,6 +320,36 @@ const SOURCES = {
   'cash'        :{name:'現金',       e:'💴'},
   'unknown'     :{name:'その他',     e:'🧾'},  // レシートスキャンで登録した経路未確定の支出
 };
+
+/* ---------- ミニマルなラインアイコン(SVG) ---------- */
+const SVGI = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
+const ICON_PATHS = {
+  food:     '<path d="M4.5 9.5h15L18 19H6L4.5 9.5z"/><path d="m9 9.5 3-5.5 3 5.5"/><path d="M10 13v2.5M14 13v2.5"/>',
+  eatout:   '<path d="M6.5 3v5a2.5 2.5 0 0 0 5 0V3"/><path d="M9 10.5V21"/><path d="M17.5 21V3c-2 1.8-2.8 4.6-2.8 7 0 1.8 1 3 2.8 3z"/>',
+  daily:    '<path d="M6.5 8h11l-1 13h-9l-1-13z"/><path d="M9.5 10.5V6.5a2.5 2.5 0 0 1 5 0v4"/>',
+  transport:'<rect x="6" y="3.5" width="12" height="13.5" rx="2.5"/><path d="M6 11h12"/><path d="M9.2 14.5h.01M14.8 14.5h.01"/><path d="M8.5 20.5 9.7 17M15.5 20.5 14.3 17"/>',
+  hobby:    '<rect x="3.5" y="8" width="17" height="9" rx="4.5"/><path d="M8.2 10.8v3.4M6.5 12.5h3.4"/><path d="M15.3 11.3h.01M17.3 13.7h.01"/>',
+  util:     '<path d="M13 3 6.5 13.5H11L10 21l6.5-10.5H12L13 3z"/>',
+  comm:     '<rect x="7.5" y="3" width="9" height="18" rx="2.2"/><path d="M11 17.8h2"/>',
+  house:    '<path d="m4 11 8-7 8 7"/><path d="M6.5 9.5V20h11V9.5"/>',
+  clothes:  '<path d="m8.5 4-4 3 2 2.8 1.5-1V20h8v-11.2l1.5 1 2-2.8-4-3a3.5 3.5 0 0 1-7 0z"/>',
+  health:   '<path d="M12 20S5 15.5 5 10.2A3.8 3.8 0 0 1 12 8a3.8 3.8 0 0 1 7 2.2C19 15.5 12 20 12 20z"/>',
+  social:   '<rect x="4.5" y="9.5" width="15" height="4"/><path d="M6.5 13.5V21h11v-7.5"/><path d="M12 9.5V21"/><path d="M12 9.5C9.2 9.5 7.6 8.2 7.6 6.4A1.9 1.9 0 0 1 11.2 5.5c.5 1 .8 2.5.8 4z"/>',
+  invest:   '<path d="m4 17.5 5.5-5.5 3.5 3.5 7-7"/><path d="M15.5 8.5H20V13"/>',
+  other:    '<path d="M4.5 8 12 4l7.5 4v8L12 20l-7.5-4V8z"/><path d="M4.5 8 12 12l7.5-4"/><path d="M12 12v8"/>',
+  transfer: '<path d="M18 8.5H7"/><path d="m15 5.5 3 3-3 3"/><path d="M6 15.5h11"/><path d="m9 12.5-3 3 3 3"/>',
+  income:   '<circle cx="12" cy="12" r="8.5"/><path d="m9.2 8 2.8 3.6L14.8 8"/><path d="M12 11.6V16"/><path d="M9.9 13.2h4.2"/>',
+  bank:     '<path d="m4 9 8-5 8 5"/><path d="M5.5 9v9M10 9v9M14 9v9M18.5 9v9"/><path d="M4 20.5h16"/>',
+  card:     '<rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="M3.5 10h17"/><path d="M7 15h3.5"/>',
+  phonepay: '<rect x="7.5" y="3" width="9" height="18" rx="2.2"/><path d="m10.4 9.2 1.6 2 1.6-2"/><path d="M12 11.2v2.6"/><path d="M10.7 12.3h2.6"/>',
+  wallet:   '<rect x="3.5" y="6.5" width="17" height="12.5" rx="2"/><path d="M20.5 11h-4.2a1.9 1.9 0 0 0 0 3.8h4.2"/>',
+  cash:     '<rect x="3" y="6.8" width="18" height="10.8" rx="1.8"/><circle cx="12" cy="12.2" r="2.7"/><path d="M6.2 12.2h.01M17.8 12.2h.01"/>',
+  receipt:  '<path d="M6.5 3.5h11v17l-1.8-1.4-1.9 1.4-1.8-1.4-1.9 1.4-1.8-1.4-1.8 1.4v-17z"/><path d="M9.5 8.5h5M9.5 12h5"/>',
+};
+const ICONS = Object.fromEntries(Object.entries(ICON_PATHS).map(([k,v])=>[k, SVGI(v)]));
+function catIcon(id){ return ICONS[id] || ICONS.other; }
+const SRC_ICON_MAP = {'rakuten-card':'card','rakuten-pay':'phonepay','rakuten-bank':'bank','rakuten-sec':'invest','paypay':'wallet','cash':'cash','unknown':'receipt'};
+function srcIcon(id){ return ICONS[SRC_ICON_MAP[id]] || ICONS.receipt; }
 
 /* ---------- 自動分類の初期キーワードルール ---------- */
 const DEFAULT_RULES = [
@@ -763,7 +797,7 @@ function categoryBreakdownHTML(s){
   const rows = entries.map(([cat,v])=>`
     <div class="catrow">
       <span class="dot" style="background:${slotColor(cat)}"></span>
-      <span class="nm">${CAT[cat]?.e||''} ${esc(CAT[cat]?.name||cat)}</span>
+      <span class="nm">${esc(CAT[cat]?.name||cat)}</span>
       <span class="pct num">${Math.round(v/total*100)}%</span>
       <span class="amt num">${yen(v)}</span>
     </div>`).join('');
@@ -776,7 +810,7 @@ function sourceBreakdownHTML(s){
   const total = entries.reduce((a,[,v])=>a+v,0);
   return `<div class="catlist">${entries.map(([src,v])=>`
     <div class="catrow">
-      <span style="font-size:16px">${SOURCES[src]?.e||'💳'}</span>
+      <span class="mic" style="color:var(--ink-3)">${srcIcon(src)}</span>
       <span class="nm">${esc(SOURCES[src]?.name||src)}</span>
       <span class="pct num">${Math.round(v/total*100)}%</span>
       <span class="amt num">${yen(v)}</span>
@@ -808,7 +842,7 @@ function renderTx(){
       oninput="txFilter.q=this.value;debouncedRender()">
     <select onchange="txFilter.cat=this.value;render()">
       <option value="">全カテゴリ</option>
-      ${CATS.map(c=>`<option value="${c.id}" ${txFilter.cat===c.id?'selected':''}>${c.e} ${c.name}</option>`).join('')}
+      ${CATS.map(c=>`<option value="${c.id}" ${txFilter.cat===c.id?'selected':''}>${c.name}</option>`).join('')}
     </select>
     <select onchange="txFilter.src=this.value;render()">
       <option value="">全連携元</option>
@@ -822,7 +856,7 @@ let _rt; function debouncedRender(){ clearTimeout(_rt); _rt=setTimeout(render,25
 function txRowHTML(t){
   const c = CAT[t.category]||CAT.other;
   return `<div class="txrow">
-    <div class="ic">${c.e}</div>
+    <div class="ic">${catIcon(t.category)}</div>
     <div class="bd" onclick="openTxDetail('${t.id}')" style="cursor:pointer" title="タップで詳細・メモ・レシート">
       <div class="ds">${esc(t.desc)||'<span class="muted">(内容なし)</span>'}${t.memo?' 📝':''}</div>
       <div class="meta">
@@ -848,7 +882,7 @@ function openCatPicker(id){
     <h3>カテゴリを変更</h3>
     <div class="muted" style="font-size:13px;margin-bottom:12px">${esc(t.desc)||'(内容なし)'} / ${yen(t.amount)}</div>
     <div class="catgrid">
-      ${CATS.map(c=>`<button class="${t.category===c.id?'on':''}" onclick="setCat('${id}','${c.id}')"><span class="e">${c.e}</span>${c.name}</button>`).join('')}
+      ${CATS.map(c=>`<button class="${t.category===c.id?'on':''}" onclick="setCat('${id}','${c.id}')"><span class="e">${catIcon(c.id)}</span>${c.name}</button>`).join('')}
     </div>`);
 }
 function setCat(id, cat){
@@ -896,7 +930,7 @@ function openTxDetail(id){
   openModal(`
     <h3>${esc(t.desc)||'明細の詳細'}</h3>
     <div class="muted" style="font-size:13px;margin-bottom:12px">
-      ${fmtDate(t.date)} / <span class="num">${yen(t.amount)}</span> / ${c.e} ${c.name} / ${SOURCES[t.source]?.name||t.source}
+      ${fmtDate(t.date)} / <span class="num">${yen(t.amount)}</span> / ${c.name} / ${SOURCES[t.source]?.name||t.source}
     </div>
     <div class="frow"><label>メモ(商品名・金額など。検索対象になります)</label>
       <textarea id="d-memo" rows="6" placeholder="例: 鶏むね肉 398円、ブロッコリー 158円">${esc(t.memo||'')}</textarea></div>
@@ -1174,7 +1208,7 @@ function renderTxModal(){
       <input type="text" id="f-desc" placeholder="例: ランチ、コンビニ" value="${esc(txForm.desc)}" oninput="txForm.desc=this.value"></div>
     <div class="frow"><label>カテゴリ</label>
       <div class="catgrid">
-        ${(txForm.type==='inc'?[CAT.income,CAT.other]:EXPENSE_CATS).map(c=>`<button class="${txForm.cat===c.id?'on':''}" onclick="txForm.cat='${c.id}';renderTxModal()"><span class="e">${c.e}</span>${c.name}</button>`).join('')}
+        ${(txForm.type==='inc'?[CAT.income,CAT.other]:EXPENSE_CATS).map(c=>`<button class="${txForm.cat===c.id?'on':''}" onclick="txForm.cat='${c.id}';renderTxModal()"><span class="e">${catIcon(c.id)}</span>${c.name}</button>`).join('')}
       </div></div>
     <div style="display:flex;gap:10px;margin-top:16px">
       <button class="btn ghost" style="flex:1" onclick="closeModal()">キャンセル</button>
@@ -1701,7 +1735,7 @@ function renderAssets(){
     <h2>口座・残高</h2>
     ${state.accounts.map(a=>`
       <div class="acctrow">
-        <div class="ic">${a.e}</div>
+        <div class="ic">${srcIcon(a.id)}</div>
         <div class="bd">
           <div class="nm">${esc(a.name)}${a.auto?' <span class="chip" style="font-size:9.5px">CSV取込で自動更新</span>':''}</div>
           <div class="up">${a.updatedAt?`${a.updatedAt} 時点`:'未登録'}</div>
@@ -1746,7 +1780,7 @@ function renderSettings(){
     ${state.rules.length ? state.rules.map((r,i)=>`
       <div class="rulerow">
         <span class="kw">${esc(r.kw)}</span>
-        <span class="chip">${CAT[r.cat]?.e||''} ${CAT[r.cat]?.name||r.cat}</span>
+        <span class="chip">${CAT[r.cat]?.name||r.cat}</span>
         <button class="del" style="color:var(--ink-3)" onclick="delRule(${i})" title="削除">✕</button>
       </div>`).join('')
     : '<div class="muted" style="font-size:13px">明細のカテゴリを変更すると、店名キーワードを自動で学習してここに表示されます。</div>'}
